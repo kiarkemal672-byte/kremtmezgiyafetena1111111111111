@@ -766,4 +766,700 @@ function studentRows(){
 }
 function vStudents(){
  return `<div class="toolbar">
-   <input class="inp
+   <input class="inp w220" placeholder="${t('search')}" value="${esc(S.stQ)}" oninput="S.stQ=this.value;paintStudents()">
+   <select class="inp w150" onchange="S.stL=this.value;paintStudents()"><option value="all">${t('allLevels')}</option><option value="senior" ${S.stL==='senior'?'selected':''}>${t('senior')}</option><option value="junior" ${S.stL==='junior'?'selected':''}>${t('junior')}</option></select>
+   <select class="inp w220" onchange="S.stT=this.value;paintStudents()"><option value="all">${t('teacher')} — ${t('allLevels')}</option>${teacherOptions().map(u=>`<option value="${u.id}" ${S.stT===u.id?'selected':''}>${esc(u.name)}</option>`).join('')}</select>
+   <span class="grow"></span>
+   ${xbar('students')}
+   <button class="btn primary" onclick="openStudentForm()"><i class="ph ph-plus"></i>${t('addStudent')}</button>
+  </div>
+  <div class="card"><table class="tbl"><thead><tr><th>#</th><th>${t('name')}</th><th>${t('testLevel')}</th><th>${t('teacher')}</th><th>${t('guardian')}</th><th>${t('phone')}</th><th>${t('actions')}</th></tr></thead><tbody id="stBody">${studentRows()}</tbody></table></div>`;
+}
+function paintStudents(){const b=document.getElementById('stBody');if(b)b.innerHTML=studentRows()}
+function openStudentForm(id){
+ const s=id?byId(V.students,id):null;
+ openModal(`<h3 class="mtitle serif">${s?t('editStudent'):t('addStudent')}</h3>
+ <form onsubmit="saveStudent(event,'${id||''}')">
+  <label class="fld">${t('name')} *</label><input class="inp" name="name" required value="${s?esc(s.name):''}">
+  <label class="fld">${t('testLevel')}</label>
+  <select class="inp" name="level"><option value="senior" ${s&&s.level==='senior'?'selected':''}>${t('senior')}</option><option value="junior" ${s&&s.level==='junior'?'selected':''}>${t('junior')}</option></select>
+  <label class="fld">${t('assignTeacher')}</label>
+  <select class="inp" name="teacherId"><option value="">${t('noTeacher')}</option>${teacherOptions().map(u=>`<option value="${u.id}" ${s&&s.teacherId===u.id?'selected':''}>${esc(u.name)}</option>`).join('')}</select>
+  <label class="fld">${t('guardian')}</label><input class="inp" name="guardian" value="${s?esc(s.guardian||''):''}">
+  <label class="fld">${t('phone')}</label><input class="inp" name="phone" dir="ltr" value="${s?esc(s.phone||''):''}">
+  <label class="fld">${t('notes')}</label><textarea class="inp" name="notes" rows="2">${s?esc(s.notes||''):''}</textarea>
+  <div class="mfoot"><button class="btn primary" type="submit"><i class="ph ph-check"></i>${t('save')}</button><button class="btn ghost" type="button" onclick="closeModal()">${t('cancel')}</button></div>
+ </form>`);
+}
+const rmv=(a,id)=>{const i=a.findIndex(x=>x.id===id);if(i>-1)a.splice(i,1)};
+async function saveStudent(e,id){e.preventDefault();const f=new FormData(e.target);
+ const rec={name:String(f.get('name')).trim(),level:f.get('level'),teacherId:f.get('teacherId')||null,
+  guardian:String(f.get('guardian')||'').trim(),phone:String(f.get('phone')||'').trim(),notes:String(f.get('notes')||'').trim()};
+ if(!rec.name){toast(t('fillAll'),'err');return}
+ try{
+  if(MODE==='server'){
+   if(id)await api('/api/students/'+id,{method:'PUT',body:JSON.stringify(rec)});
+   else await api('/api/students',{method:'POST',body:JSON.stringify(rec)});
+  }else{
+   if(id){Object.assign(byId(DB.students,id),rec);logAct(t('editStudent')+': '+rec.name)}
+   else{rec.id=uid('s');DB.students.push(rec);logAct(t('addStudent')+': '+rec.name)}
+   saveDB();
+  }
+  closeModal();toast(t('savedOk'));await fullRefresh();
+ }catch(err){toast(errMsg(err),'err')}
+}
+function delStudent(id){confirmBox(t('deleteWarn'),async()=>{
+ try{
+  if(MODE==='server'){await api('/api/students/'+id,{method:'DELETE'})}
+  else{rmv(DB.students,id);DB.scores=DB.scores.filter(c=>c.studentId!==id);DB.readings=DB.readings.filter(r=>r.studentId!==id);logAct(t('delete')+' — '+t('navStudents'));saveDB()}
+  closeModal();toast(t('deletedOk'));await fullRefresh();
+ }catch(err){closeModal();toast(errMsg(err),'err')}
+})}
+
+/* ================================================================
+   12) الاختبارات + تسجيل الدرجات
+================================================================ */
+function vTests(){
+ if(S.gradingTest)return vGrading();
+ const lv=S.testLevel||'all';let list=V.tests.slice();if(lv!=='all')list=list.filter(x=>x.level===lv);
+ return `<div class="toolbar">
+  <select class="inp w150" onchange="S.testLevel=this.value;render()"><option value="all">${t('allLevels')}</option><option value="senior" ${lv==='senior'?'selected':''}>${t('senior')}</option><option value="junior" ${lv==='junior'?'selected':''}>${t('junior')}</option></select>
+  <span class="grow"></span><button class="btn primary" onclick="openTestForm()"><i class="ph ph-plus"></i>${t('addTest')}</button></div>
+  <div class="card">${list.length?`<table class="tbl"><thead><tr><th>${t('testTitle')}</th><th>${t('testSubject')}</th><th>${t('testLevel')}</th><th>${t('maxScore')}</th><th>${t('testDate')}</th><th></th><th>${t('actions')}</th></tr></thead><tbody>
+  ${list.map(x=>`<tr>
+   <td><b>${esc(x.title)}</b>${x.type==='quran'?` <span class="bdg qrn">${t('typeQuran')}</span>`:''}</td>
+   <td>${t('subject_'+x.subject)}</td><td><span class="bdg ${x.level}">${t(x.level)}</span></td>
+   <td class="serif big">${x.max}</td><td class="mut">${fmtDate(x.date)}</td><td class="mut">${t('registered',x.scored||0)}</td>
+   <td class="nowrap"><button class="btn sm primary" onclick="openGrading('${x.id}')"><i class="ph ph-pencil-line"></i>${t('enterScores')}</button>
+   <button class="icon-btn" onclick="openTestForm('${x.id}')"><i class="ph ph-pencil-simple"></i></button>
+   <button class="icon-btn danger" onclick="delTest('${x.id}')"><i class="ph ph-trash"></i></button></td></tr>`).join('')}
+  </tbody></table>`:`<p class="mut pad">${t('noData')}</p>`}</div>`;
+}
+async function loadGrading(tid){
+ if(MODE==='server'){S.grading=await api('/api/tests/'+tid+'/scores');return}
+ const tst=byId(DB.tests,tid);if(!tst)throw{code:'not_found'};
+ const rows=DB.students.filter(s=>s.level===tst.level).sort((a,b)=>a.name.localeCompare(b.name)).map(s=>{
+  const c=DB.scores.find(x=>x.testId===tid&&x.studentId===s.id);
+  return{studentId:s.id,name:s.name,level:s.level,teacherId:s.teacherId,score:c?c.score:null,note:c?(c.note||''):''}});
+ S.grading={test:{...tst},rows};
+}
+async function openGrading(id){S.gradingTest=id;S.grading=null;render();window.scrollTo(0,0);
+ try{await loadGrading(id)}catch(e){toast(errMsg(e),'err')}
+ render()}
+function vGrading(){
+ if(!S.grading)return loadingP();
+ const tst=S.grading.test,rows=S.grading.rows||[];
+ const scored=rows.filter(r=>r.score!==null&&r.score!==undefined);
+ const avg=scored.length?scored.reduce((a,r)=>a+r.score/tst.max,0)/scored.length*100:0;
+ return `<div class="toolbar">
+   <button class="btn sm ghost" onclick="S.gradingTest=null;S.grading=null;render()"><i class="ph ph-arrow-left flip"></i>${t('back')}</button>
+   <div class="grow"><h3 class="serif" style="font-size:21px">${esc(tst.title)}</h3><p class="mut" style="font-size:13px">${t('maxScore')}: <b class="serif" style="font-size:16px">${tst.max}</b> · ${t(tst.level)} · ${fmtDate(tst.date)} · ${t('avgRow')}: <b>${avg.toFixed(0)}%</b></p></div>
+   ${xbar('scores',tst.id)}
+   <button class="btn ghost" onclick="openSheet('attendance','${tst.id}')"><i class="ph ph-list-checks"></i>${t('attendanceSheet')}</button>
+  </div>
+  <form onsubmit="saveScores(event,'${tst.id}')"><div class="card"><table class="tbl"><thead><tr><th>#</th><th>${t('name')}</th><th>${t('scoreCol')} (${t('outOf',tst.max)})</th><th>${t('pctCol')}</th><th>${t('noteCol')}</th></tr></thead><tbody>
+  ${rows.map((r,i)=>`<tr>
+   <td class="mut">${i+1}</td><td><b>${esc(r.name)}</b></td>
+   <td><input class="inp num" type="number" step="0.5" min="0" max="${tst.max}" name="v_${r.studentId}" value="${r.score??''}" placeholder="—" oninput="gPct(this,${tst.max})"></td>
+   <td class="pc mut">${r.score!==null&&r.score!==undefined?Math.round(r.score/tst.max*100)+'%':'—'}</td>
+   <td><input class="inp" name="n_${r.studentId}" value="${esc(r.note||'')}"></td></tr>`).join('')||`<tr><td colspan="5" class="mut" style="text-align:center;padding:26px">${t('noData')}</td></tr>`}
+  </tbody></table></div>
+  <div class="bar" style="margin-top:14px"><button class="btn primary" type="submit"><i class="ph ph-check"></i>${t('saveScores')}</button></div></form>`;
+}
+function gPct(inp,max){const tr=inp.closest('tr');const pc=tr.querySelector('.pc');const v=parseFloat(inp.value);pc.textContent=(isNaN(v)||v<0)?'—':Math.round(v/max*100)+'%'}
+async function saveScores(e,tid){e.preventDefault();const f=new FormData(e.target);
+ try{
+  if(MODE==='server'){
+   const scores=(S.grading.rows||[]).map(r=>{
+    const raw=f.get('v_'+r.studentId);const note=String(f.get('n_'+r.studentId)||'').trim();
+    return{studentId:r.studentId,score:(raw===''||raw===null)?null:parseFloat(raw),note}});
+   await api('/api/tests/'+tid+'/scores',{method:'PUT',body:JSON.stringify({scores})});
+  }else{
+   const tst=byId(DB.tests,tid);let n=0;
+   (S.grading.rows||[]).forEach(r=>{
+    const raw=f.get('v_'+r.studentId);const note=String(f.get('n_'+r.studentId)||'').trim();
+    const ex=DB.scores.find(c=>c.testId===tid&&c.studentId===r.studentId);
+    if(raw===''||raw===null){if(ex)rmv(DB.scores,ex.id);return}
+    let v=parseFloat(raw);if(isNaN(v))return;v=Math.max(0,Math.min(tst.max,v));
+    if(ex){ex.score=v;ex.note=note}else DB.scores.push({id:uid('c'),testId:tid,studentId:r.studentId,score:v,note});
+    n++});
+   logAct(t('enterScores')+': '+tst.title+' ('+n+')');saveDB();
+  }
+  toast(t('savedOk'));await fullRefresh();
+ }catch(err){toast(errMsg(err),'err')}
+}
+function openTestForm(id){
+ const x=id?byId(V.tests,id):null;const subs=['quran','fiqh','aqidah','sirah','tajweed','akhlaq','hadith','other'];
+ openModal(`<h3 class="mtitle serif">${x?t('editTest'):t('addTest')}</h3>
+ <form onsubmit="saveTest(event,'${id||''}')">
+  <label class="fld">${t('testTitle')} *</label><input class="inp" name="title" required value="${x?esc(x.title):''}">
+  <label class="fld">${t('testLevel')}</label>
+  <select class="inp" name="level"><option value="senior" ${x&&x.level==='senior'?'selected':''}>${t('senior')}</option><option value="junior" ${x&&x.level==='junior'?'selected':''}>${t('junior')}</option></select>
+  <label class="fld">${t('testSubject')}</label>
+  <select class="inp" name="type" onchange="if(this.value==='quran')this.form.subject.value='quran'">
+   <option value="quran" ${x&&x.type==='quran'?'selected':''}>${t('typeQuran')}</option><option value="subject" ${x&&x.type==='subject'?'selected':''}>${t('typeSubject')}</option></select>
+  <select class="inp" name="subject" style="margin-top:8px">${subs.map(k=>`<option value="${k}" ${x&&x.subject===k?'selected':''}>${t('subject_'+k)}</option>`).join('')}</select>
+  <label class="fld">${t('maxScore')} *</label>
+  <div class="bar" style="margin-bottom:8px">${[10,20,25,50,100].map(v=>`<button type="button" class="btn sm ghost" onclick="this.form.max.value=${v}">${v}</button>`).join('')}</div>
+  <input class="inp num" type="number" name="max" min="1" required value="${x?x.max:25}">
+  <p class="mut" style="font-size:12px;margin-top:5px">${t('maxScoreHint')}</p>
+  <label class="fld">${t('testDate')}</label><input class="inp" type="date" name="date" value="${x?x.date:todayISO()}">
+  <div class="mfoot"><button class="btn primary" type="submit"><i class="ph ph-check"></i>${t('save')}</button><button class="btn ghost" type="button" onclick="closeModal()">${t('cancel')}</button></div>
+ </form>`);
+}
+async function saveTest(e,id){e.preventDefault();const f=new FormData(e.target);
+ const body={title:String(f.get('title')).trim(),level:f.get('level'),type:f.get('type'),subject:f.get('subject'),
+  max:Math.max(1,parseFloat(f.get('max'))||1),date:f.get('date')||todayISO()};
+ if(!body.title){toast(t('fillAll'),'err');return}
+ try{
+  if(MODE==='server'){
+   if(id)await api('/api/tests/'+id,{method:'PUT',body:JSON.stringify(body)});
+   else await api('/api/tests',{method:'POST',body:JSON.stringify(body)});
+  }else{
+   if(id){Object.assign(byId(DB.tests,id),body);logAct(t('editTest')+': '+body.title)}
+   else{DB.tests.push({id:uid('t'),...body,by:S.user.name});logAct(t('addTest')+': '+body.title)}
+   saveDB();
+  }
+  closeModal();toast(t('savedOk'));await fullRefresh();
+ }catch(err){toast(errMsg(err),'err')}
+}
+function delTest(id){confirmBox(t('deleteTestWarn'),async()=>{
+ try{
+  if(MODE==='server'){await api('/api/tests/'+id,{method:'DELETE'})}
+  else{rmv(DB.tests,id);DB.scores=DB.scores.filter(c=>c.testId!==id);saveDB()}
+  if(S.gradingTest===id){S.gradingTest=null;S.grading=null}
+  closeModal();toast(t('deletedOk'));await fullRefresh();
+ }catch(err){closeModal();toast(errMsg(err),'err')}
+})}
+
+/* ================================================================
+   13) المهرجانية — برنامج يوم الاختتام
+================================================================ */
+function actRow(a){
+ const who=(a.participants||[]).map(p=>esc(p.name)).filter(Boolean).join(' · ')||'—';
+ const desc=a.description||a.desc||'';
+ return `<div class="act-row">
+  <div class="act-num">${String(a.order||0).padStart(2,'0')}</div>
+  <div class="act-main"><h5>${esc(a.title)}</h5>${desc?`<p class="act-desc">${esc(desc)}</p>`:''}
+  <p class="act-who"><i class="ph ph-microphone"></i>${who}</p></div>
+  <div class="act-min"><b>${a.minutes??a.mins??''}</b>${t('minShort')}</div>
+  <div class="act-tools"><button class="icon-btn" title="${t('edit')}" onclick="openActivityForm('${a.section}','${a.id}')"><i class="ph ph-pencil-simple"></i></button>
+  <button class="icon-btn danger" title="${t('delete')}" onclick="delActivity('${a.id}')"><i class="ph ph-trash"></i></button></div>
+ </div>`;
+}
+function vFestival(){
+ const d=V.settings.festivalDate;
+ const secs=[['senior','seniorProgram'],['junior','juniorProgram']];
+ return `<div class="fest-head">
+   <div><div class="fest-date"><i class="ph ph-calendar-blank"></i>${fmtDate(d)}</div>
+   <h3 class="serif">${t('festivalTitle')}</h3><p class="mut">${t('festivalSub')}</p></div>
+   <div class="bar">
+    ${xbar('program')}
+    <button class="btn ghost" onclick="openSheet('festAtt')"><i class="ph ph-list-checks"></i>${t('attendanceAllSheet')}</button>
+    ${isOwner()?`<button class="btn ghost" onclick="openFestDate()"><i class="ph ph-calendar-check"></i>${t('festDateLabel')}</button>`:''}
+    <button class="btn primary" onclick="openActivityForm('senior')"><i class="ph ph-plus"></i>${t('addActivity')}</button>
+   </div></div>
+  ${secs.map(([sec,key])=>{const acts=V.activities.filter(a=>a.section===sec).sort((a,b)=>(a.order||0)-(b.order||0));
+   return `<section class="prog"><header class="prog-head"><h4 class="serif">${t(key)}</h4><span class="cnt">${acts.length}</span></header>
+   ${acts.map(actRow).join('')||`<p class="mut pad">${t('noData')}</p>`}
+   <button class="btn sm ghost add-act" onclick="openActivityForm('${sec}')"><i class="ph ph-plus"></i>${t('addActivity')}</button></section>`}).join('')}`;
+}
+function openActivityForm(section,id){
+ const a=id?byId(V.activities,id):null;
+ openModal(`<h3 class="mtitle serif">${a?t('editActivity'):t('addActivity')} — ${t(section==='senior'?'seniorProgram':'juniorProgram')}</h3>
+ <form onsubmit="saveActivity(event,'${section}','${id||''}')">
+  <label class="fld">${t('testTitle')} *</label><input class="inp" name="title" required value="${a?esc(a.title):''}">
+  <label class="fld">${t('activityDesc')}</label><input class="inp" name="desc" value="${a?esc(a.description||a.desc||''):''}">
+  <label class="fld">${t('participantsLabel')}</label><textarea class="inp" name="who" rows="4" placeholder="${t('participantsHint')}">${a?(a.participants||[]).map(p=>esc(p.name)).join('\n'):''}</textarea>
+  <label class="fld">${t('minutes')}</label><input class="inp num" type="number" name="mins" min="0" value="${a?(a.minutes??a.mins??5):5}">
+  <div class="mfoot"><button class="btn primary" type="submit"><i class="ph ph-check"></i>${t('save')}</button><button class="btn ghost" type="button" onclick="closeModal()">${t('cancel')}</button></div>
+ </form>`);
+}
+async function saveActivity(e,section,id){e.preventDefault();const f=new FormData(e.target);
+ const title=String(f.get('title')).trim();if(!title){toast(t('fillAll'),'err');return}
+ const participants=String(f.get('who')||'').split('\n').map(s=>s.trim()).filter(Boolean).map(n=>({name:n}));
+ const mins=parseInt(f.get('mins'))||0;const desc=String(f.get('desc')||'').trim();
+ try{
+  if(MODE==='server'){
+   const body={section,title,description:desc,minutes:mins,participants};
+   if(id)await api('/api/activities/'+id,{method:'PUT',body:JSON.stringify(body)});
+   else await api('/api/activities',{method:'POST',body:JSON.stringify(body)});
+  }else{
+   if(id){const a=byId(DB.activities,id);Object.assign(a,{title,description:desc,participants,minutes:mins});logAct(t('editActivity')+': '+title)}
+   else{DB.activities.push({id:uid('a'),section,title,description:desc,participants,minutes:mins,
+    order:Math.max(0,...DB.activities.filter(x=>x.section===section).map(x=>x.order||0))+1});logAct(t('addActivity')+': '+title)}
+   saveDB();
+  }
+  closeModal();toast(t('savedOk'));await fullRefresh();
+ }catch(err){toast(errMsg(err),'err')}
+}
+function delActivity(id){confirmBox(t('deleteWarn'),async()=>{
+ try{
+  if(MODE==='server'){await api('/api/activities/'+id,{method:'DELETE'})}
+  else{rmv(DB.activities,id);saveDB()}
+  closeModal();toast(t('deletedOk'));await fullRefresh();
+ }catch(err){closeModal();toast(errMsg(err),'err')}
+})}
+function openFestDate(){openModal(`<h3 class="mtitle serif">${t('festDateLabel')}</h3>
+ <form onsubmit="saveFestDate(event)"><label class="fld">${t('festDateLabel')}</label>
+ <input class="inp" type="date" name="d" value="${V.settings.festivalDate}" required>
+ <div class="mfoot"><button class="btn primary" type="submit"><i class="ph ph-check"></i>${t('save')}</button><button class="btn ghost" type="button" onclick="closeModal()">${t('cancel')}</button></div></form>`)}
+async function saveFestDate(e){e.preventDefault();const d=new FormData(e.target).get('d');
+ try{
+  if(MODE==='server'){await api('/api/settings',{method:'PUT',body:JSON.stringify({festivalDate:d})})}
+  else{DB.settings.festivalDate=d;saveDB()}
+  closeModal();toast(t('savedOk'));await fullRefresh();
+ }catch(err){toast(errMsg(err),'err')}
+}
+
+/* ================================================================
+   14) الزيادة في القراءة — وحدة مستقلة تماماً
+================================================================ */
+function vReadings(){
+ const kindB={z:['kindZ','z'],m:['kindM','m'],h:['kindH','h']};
+ const list=V.readings;
+ const top=V.leaders.slice(0,6);const mx=Math.max(1,...top.map(x=>x.totalAyat));
+ return `<div class="spark-card">
+   <div><h3 class="serif">${t('readingsTitle')}</h3><p>${t('independentNote')}</p></div>
+   <button class="btn brass" onclick="openReadingForm()"><i class="ph ph-book-open"></i>${t('newReading')}</button>
+  </div>
+  <div class="rd-grid">
+   <div>
+    <div class="toolbar">${xbar('readings')}</div>
+    <div class="card"><table class="tbl"><thead><tr><th>${t('date')}</th><th>${t('readingStudent')}</th><th>${t('kindCol')}</th><th>${t('surah')}</th><th>${t('ayatWord')}</th><th>${t('listenedBy')}</th><th>${t('actions')}</th></tr></thead><tbody>
+    ${list.map(r=>{const kb=kindB[r.kind]||kindB.z;return `<tr>
+     <td class="mut" style="white-space:nowrap">${fmtDate(r.date)}</td><td><b>${esc(r.studentName||'—')}</b></td>
+     <td><span class="bdg ${kb[1]}">${t(kb[0])}</span></td><td>${esc(r.surah)}</td>
+     <td class="serif">${r.from}–${r.to} <span class="mut">(${r.ayat})</span></td><td class="mut">${esc(r.listener||'')}</td>
+     <td class="nowrap"><button class="icon-btn danger" onclick="delReading('${r.id}')"><i class="ph ph-trash"></i></button></td></tr>`}).join('')||`<tr><td colspan="7" class="mut" style="text-align:center;padding:26px">${t('noData')}</td></tr>`}
+    </tbody></table></div>
+   </div>
+   <aside class="panel"><h4><i class="ph ph-star"></i>${t('topReaders')}</h4>
+    ${top.map(x=>`<div class="top-row"><span class="rk">${x.totalAyat}</span><div><div class="nm">${esc(x.name)}</div><div class="pulse-bar" style="margin-top:5px"><i style="width:${(x.totalAyat/mx*100).toFixed(0)}%"></i></div></div><span class="ay">${t('ayatWord')}</span></div>`).join('')||`<p class="mut">${t('noData')}</p>`}
+   </aside>
+  </div>`;
+}
+function listenerOptions(){
+ const names=new Set([S.user.name]);
+ V.users.forEach(u=>{if(u.active!==false)names.add(u.name)});
+ V.readings.forEach(r=>{if(r.listener)names.add(r.listener)});
+ return [...names];
+}
+function openReadingForm(){
+ const sts=V.students.slice().sort((a,b)=>a.name.localeCompare(b.name));
+ if(!sts.length){toast(t('noStudentsYet'),'err');return}
+ openModal(`<h3 class="mtitle serif">${t('newReading')}</h3><p class="msub">${t('independentNote')}</p>
+ <form onsubmit="saveReading(event)">
+  <label class="fld">${t('readingStudent')} *</label>
+  <select class="inp" name="studentId" required>${sts.map(s=>`<option value="${s.id}">${esc(s.name)} — ${t(s.level)}</option>`).join('')}</select>
+  <label class="fld">${t('readingKind')}</label>
+  <select class="inp" name="kind"><option value="z">${t('kindZ')}</option><option value="m">${t('kindM')}</option><option value="h">${t('kindH')}</option></select>
+  <label class="fld">${t('surah')}</label>
+  <select class="inp" id="rdSurah" onchange="surahChanged()">${SURAHS.map((s,i)=>`<option value="${i}">${s[0]} (${s[1]})</option>`).join('')}</select>
+  <div class="bar" style="gap:10px;margin-top:4px">
+   <div style="flex:1"><label class="fld">${t('fromAyah')}</label><input class="inp" id="rdFrom" type="number" min="1" value="1" oninput="calcAyat()"></div>
+   <div style="flex:1"><label class="fld">${t('toAyah')}</label><input class="inp" id="rdTo" type="number" min="1" value="1" oninput="calcAyat()"></div>
+  </div>
+  <p class="mut" style="font-size:13px;margin-top:8px"><i class="ph ph-book-open"></i> <b id="rdAyat" class="serif" style="font-size:16px">1</b> ${t('ayatWord')}</p>
+  <label class="fld">${t('listenedBy')}</label>
+  <select class="inp" name="listener">${listenerOptions().map(n=>`<option value="${esc(n)}" ${n===S.user.name?'selected':''}>${esc(n)}</option>`).join('')}</select>
+  <label class="fld">${t('readingDate')}</label><input class="inp" type="date" name="date" value="${todayISO()}">
+  <label class="fld">${t('notes')}</label><input class="inp" name="note">
+  <div class="mfoot"><button class="btn brass" type="submit"><i class="ph ph-check"></i>${t('save')}</button><button class="btn ghost" type="button" onclick="closeModal()">${t('cancel')}</button></div>
+ </form>`);
+}
+function surahChanged(){const n=SURAHS[+document.getElementById('rdSurah').value][1];['rdFrom','rdTo'].forEach(id=>{const el=document.getElementById(id);el.max=n;if(+el.value>n)el.value=n});calcAyat()}
+function calcAyat(){const a=+document.getElementById('rdFrom').value||0,b=+document.getElementById('rdTo').value||0;document.getElementById('rdAyat').textContent=(b>=a&&a>0)?(b-a+1):0}
+async function saveReading(e){e.preventDefault();const f=new FormData(e.target);
+ const si=+document.getElementById('rdSurah').value,from=+document.getElementById('rdFrom').value,to=+document.getElementById('rdTo').value;
+ const n=SURAHS[si][1];if(!(from>=1&&to>=from&&to<=n)){toast(t('fillAll'),'err');return}
+ const body={studentId:f.get('studentId'),kind:f.get('kind'),surah:SURAHS[si][0],from,to,
+  listener:f.get('listener'),date:f.get('date')||todayISO(),note:String(f.get('note')||'')};
+ try{
+  if(MODE==='server'){await api('/api/readings',{method:'POST',body:JSON.stringify(body)})}
+  else{DB.readings.push({id:uid('r'),...body,ayat:to-from+1});logAct(t('newReading')+': '+body.surah+' '+from+'-'+to);saveDB()}
+  closeModal();toast(t('savedOk'));await fullRefresh();
+ }catch(err){toast(errMsg(err),'err')}
+}
+function delReading(id){confirmBox(t('deleteWarn'),async()=>{
+ try{
+  if(MODE==='server'){await api('/api/readings/'+id,{method:'DELETE'})}
+  else{rmv(DB.readings,id);saveDB()}
+  closeModal();toast(t('deletedOk'));await fullRefresh();
+ }catch(err){closeModal();toast(errMsg(err),'err')}
+})}
+
+/* ================================================================
+   15) التقارير
+================================================================ */
+async function loadReport(sid){
+ if(MODE==='server'){S.report=await api('/api/students/'+sid+'/report');return}
+ const st=byId(DB.students,sid);if(!st)throw{code:'not_found'};
+ const rows=DB.scores.filter(c=>c.studentId===sid).map(c=>{const tst=byId(DB.tests,c.testId);
+  return tst?{testId:tst.id,title:tst.title,subject:tst.subject,max:tst.max,score:c.score,note:c.note||'',date:tst.date}:null}).filter(Boolean);
+ const avg=rows.length?rows.reduce((a,x)=>a+x.score/x.max,0)/rows.length*100:0;
+ const peers=DB.students.filter(s=>s.level===st.level).map(s=>{
+  const rs=DB.scores.filter(c=>c.studentId===s.id).map(c=>{const tst=byId(DB.tests,c.testId);return tst?c.score/tst.max:0});
+  return{id:s.id,a:rs.length?rs.reduce((x,y)=>x+y,0)/rs.length:0}});
+ peers.sort((a,b)=>b.a-a.a);
+ const rank=peers.findIndex(p=>p.id===sid)+1;
+ const u=byId(DB.users,st.teacherId);
+ S.report={student:{...st,teacherName:u?u.name:null},rows,avg:Math.round(avg*10)/10,rank:rank||null,peers:peers.length};
+}
+async function showReport(){
+ const sel=document.getElementById('repSel');if(!sel||!sel.value)return;
+ S.reportStudent=sel.value;S.report=null;render();
+ try{await loadReport(S.reportStudent)}catch(e){toast(errMsg(e),'err')}
+ render();
+}
+function vReports(){
+ const sts=V.students.slice().sort((a,b)=>a.name.localeCompare(b.name));
+ const rep=S.report;
+ if(!sts.length)return `<div class="card"><div class="empty-hero"><i class="ph ph-student"></i>${t('noStudentsYet')}</div></div>`;
+ return `<div class="toolbar">
+   <select class="inp w220" id="repSel">${sts.map(s=>`<option value="${s.id}" ${S.reportStudent===s.id?'selected':''}>${esc(s.name)} — ${t(s.level)}</option>`).join('')}</select>
+   <button class="btn primary" onclick="showReport()"><i class="ph ph-chart-bar"></i>${t('showReport')}</button>
+  </div>
+  ${S.reportStudent&&!rep?loadingP():
+   rep&&rep.student?`<div class="card" style="padding:22px 24px;margin-bottom:20px">
+   <div class="bar" style="justify-content:space-between">
+    <div><h3 class="serif" style="font-size:22px">${t('reportFor',esc(rep.student.name))}</h3>
+    <p class="mut" style="font-size:13px">${t('studentLevel')}: <b>${t(rep.student.level)}</b> · ${t('studentTeacher')}: <b>${rep.student.teacherName?esc(rep.student.teacherName):t('noTeacher')}</b> · ${t('testsTaken')}: <b>${rep.rows.length}</b> · ${t('rank')}: <b class="serif">${rep.rank||'—'} / ${rep.peers}</b></p></div>
+    <div style="text-align:center"><div class="serif" style="font-size:38px;font-weight:600">${Number(rep.avg).toFixed(1)}%</div><div class="mut" style="font-size:12px">${t('studentAvg')}</div></div>
+   </div>
+   <table class="tbl" style="margin-top:14px"><thead><tr><th>${t('testTitle')}</th><th>${t('testSubject')}</th><th>${t('maxScore')}</th><th>${t('scoreCol')}</th><th>${t('pctCol')}</th><th>${t('date')}</th></tr></thead><tbody>
+   ${rep.rows.map(x=>`<tr><td><b>${esc(x.title)}</b></td><td>${t('subject_'+x.subject)}</td><td class="serif">${x.max}</td><td class="serif" style="font-size:17px"><b>${x.score}</b></td>
+   <td><div class="bar"><div class="pulse-bar" style="width:90px"><i style="width:${Math.round(x.score/x.max*100)}%"></i></div><span class="mut">${Math.round(x.score/x.max*100)}%</span></div></td>
+   <td class="mut">${fmtDate(x.date)}</td></tr>`).join('')||`<tr><td colspan="6" class="mut" style="text-align:center;padding:22px">${t('noScores')}</td></tr>`}
+   </tbody></table>
+   <div class="bar" style="margin-top:16px">${xbar('report',rep.student.id)}</div>
+  </div>`:`<p class="mut pad card" style="padding:22px">${t('noReport')}</p>`}
+  <section class="panel" style="margin-top:20px"><h4><i class="ph ph-printer"></i>${t('quickSheets')}</h4>
+   <div class="bar">${V.tests.map(x=>`<button class="btn sm ghost" onclick="openSheet('attendance','${x.id}')"><i class="ph ph-list-checks"></i>${t('sheetFor',esc(x.title))}</button>`).join('')}
+   <button class="btn sm ghost" onclick="openSheet('festAtt')"><i class="ph ph-confetti"></i>${t('attendanceAllSheet')}</button></div>
+  </section>`;
+}
+
+/* ================================================================
+   16) الأساتذة (المشرف العام فقط)
+================================================================ */
+function vTeachers(){
+ if(!isOwner())return `<p class="mut pad">${t('noData')}</p>`;
+ const list=V.users.slice().sort((a,b)=>(a.role==='owner'?-1:1)-(b.role==='owner'?-1:1));
+ return `<div class="toolbar"><span class="grow"></span><button class="btn primary" onclick="openTeacherForm()"><i class="ph ph-plus"></i>${t('addTeacher')}</button></div>
+  <div class="card"><table class="tbl"><thead><tr><th>${t('name')}</th><th>${t('tUsername')}</th><th>${t('tSubject')}</th><th>${t('studentsCol')}</th><th>${t('statusCol')}</th><th>${t('actions')}</th></tr></thead><tbody>
+  ${list.map(u=>`<tr>
+   <td><b>${esc(u.name)}</b>${u.role==='owner'?' <span class="bdg qrn">'+t('supervisor')+'</span>':''}</td>
+   <td dir="ltr">${esc(u.username||'')}</td><td class="mut">${esc(u.subject||'—')}</td>
+   <td class="serif" style="font-size:17px">${u.studentsCount??'—'}</td>
+   <td>${u.active===false?`<span class="bdg senior">${t('inactiveStat')}</span>`:`<span class="bdg junior">${t('activeStat')}</span>`}</td>
+   <td class="nowrap">
+    <button class="icon-btn" title="${t('edit')}" onclick="openTeacherForm('${u.id}')"><i class="ph ph-pencil-simple"></i></button>
+    ${u.role!=='owner'?`<button class="icon-btn" title="${t('statusCol')}" onclick="toggleTeacher('${u.id}',${u.active===false})"><i class="ph ph-${u.active===false?'play':'pause'}"></i></button>
+    <button class="icon-btn danger" title="${t('delete')}" onclick="delTeacher('${u.id}')"><i class="ph ph-trash"></i></button>`:''}
+   </td></tr>`).join('')}
+  </tbody></table></div>`;
+}
+function openTeacherForm(id){
+ const u=id?byId(V.users,id):null;
+ openModal(`<h3 class="mtitle serif">${u?t('editTeacher'):t('addTeacher')}</h3>
+ <form onsubmit="saveTeacher(event,'${id||''}')">
+  <label class="fld">${t('name')} *</label><input class="inp" name="name" required value="${u?esc(u.name):''}">
+  <label class="fld">${t('tUsername')} *</label><input class="inp" name="username" dir="ltr" required value="${u?esc(u.username||''):''}">
+  <label class="fld">${u?t('tPassNew'):t('tPass')} *</label><input class="inp" name="pass" type="text" dir="ltr" ${u?'':'required'}>
+  <label class="fld">${t('tSubject')}</label><input class="inp" name="subject" value="${u?esc(u.subject||''):''}">
+  <div class="mfoot"><button class="btn primary" type="submit"><i class="ph ph-check"></i>${t('save')}</button><button class="btn ghost" type="button" onclick="closeModal()">${t('cancel')}</button></div>
+ </form>`);
+}
+async function saveTeacher(e,id){e.preventDefault();const f=new FormData(e.target);
+ const rec={name:String(f.get('name')).trim(),username:String(f.get('username')).trim(),subject:String(f.get('subject')||'').trim()};
+ const pass=String(f.get('pass')||'');
+ if(!rec.name||!rec.username||(!id&&!pass)){toast(t('fillAll'),'err');return}
+ try{
+  if(MODE==='server'){
+   const body={...rec};if(pass)body.password=pass;
+   if(id)await api('/api/users/'+id,{method:'PUT',body:JSON.stringify(body)});
+   else await api('/api/users',{method:'POST',body:JSON.stringify(body)});
+  }else{
+   if(DB.users.some(u=>u.username===rec.username&&u.id!==id))throw{code:'username_taken'};
+   if(id){const u=byId(DB.users,id);Object.assign(u,rec);if(pass)u.pass=pHash(pass);logAct(t('editTeacher')+': '+rec.name)}
+   else{DB.users.push({id:uid('u'),...rec,pass:pHash(pass),role:'teacher',active:true});logAct(t('addTeacher')+': '+rec.name)}
+   saveDB();
+  }
+  closeModal();toast(t('savedOk'));await fullRefresh();
+ }catch(err){toast(errMsg(err),'err')}
+}
+async function toggleTeacher(id,makeActive){
+ try{
+  if(MODE==='server'){await api('/api/users/'+id+'/status',{method:'PATCH',body:JSON.stringify({active:!!makeActive})})}
+  else{const u=byId(DB.users,id);u.active=!!makeActive;logAct((makeActive?t('activeStat'):t('inactiveStat'))+' — '+u.name);saveDB()}
+  toast(t('savedOk'));await fullRefresh();
+ }catch(err){toast(errMsg(err),'err')}
+}
+function delTeacher(id){
+ const u=byId(V.users,id);
+ if(u&&u.id===S.user.id){toast(t('cannotDeleteSelf'),'err');return}
+ confirmBox(t('deleteTeacherWarn'),async()=>{
+  try{
+   if(MODE==='server'){await api('/api/users/'+id,{method:'DELETE'})}
+   else{rmv(DB.users,id);logAct(t('delete')+' — '+t('navTeachers'));saveDB()}
+   closeModal();toast(t('deletedOk'));await fullRefresh();
+  }catch(err){closeModal();toast(errMsg(err),'err')}
+ })
+}
+
+/* ================================================================
+   17) الإعدادات + التخزين + الترحيل + النسخ الاحتياطي
+================================================================ */
+function localDataExists(){
+ try{const raw=localStorage.getItem('nour_summer_v2');if(!raw)return false;
+  const d=JSON.parse(raw);return d&&((d.students||[]).length>0||(d.scores||[]).length>0||(d.readings||[]).length>0);
+ }catch(e){return false}
+}
+function vSettings(){
+ const own=isOwner();
+ const migratable=MODE==='server'&&own&&localDataExists();
+ return `<div class="dash-grid" style="margin-top:0">
+  <section class="panel"><h4><i class="ph ph-gear"></i>${t('settingsTitle')}</h4>
+   <form onsubmit="saveSettings(event)">
+    <label class="fld">${t('schoolLabel')}</label>
+    <input class="inp" name="schoolName" value="${esc(V.settings.schoolName||'')}" ${own?'':'disabled'}>
+    <label class="fld">${t('festDateLabel')}</label>
+    <input class="inp" type="date" name="festivalDate" value="${V.settings.festivalDate}" ${own?'':'disabled'}>
+    <label class="fld">${t('langLabel')}</label>
+    <div class="langs"><button type="button" class="${LANG==='am'?'on':''}" onclick="setLang('am')">አማርኛ</button><button type="button" class="${LANG==='ar'?'on':''}" onclick="setLang('ar')">العربية</button><button type="button" class="${LANG==='en'?'on':''}" onclick="setLang('en')">English</button></div>
+    ${own?`<div class="mfoot" style="margin-top:20px"><button class="btn primary" type="submit"><i class="ph ph-check"></i>${t('save')}</button></div>`
+        :`<p class="mut" style="font-size:12.5px;margin-top:16px"><i class="ph ph-crown-simple"></i> ${t('ownerOnly')}</p>`}
+   </form>
+  </aside>
+  <aside class="panel"><h4><i class="ph ph-database"></i>${t('storageTitle')}</h4>
+   ${MODE==='server'
+    ?`<p class="ok-note"><i class="ph ph-check-circle"></i>${t('dataOnServer')}</p>`
+    :`<p class="mut" style="font-size:13px">${t('localNote')}</p>
+      <div class="mig-card"><b>${t('setupTitle')}</b><p class="steps">${t('setupSteps')}</p></div>`}
+   ${MODE==='local'||own?`<div class="bar" style="margin-top:14px">
+    <button class="btn ghost" onclick="exportBackup()"><i class="ph ph-download"></i>${t('exportBackup')}</button>
+    <label class="btn ghost" style="cursor:pointer"><i class="ph ph-upload-simple"></i>${t('importBackup')}<input type="file" accept=".json" style="display:none" onchange="importBackup(this)"></label>
+   </div>`:''}
+   ${migratable?`<div class="mig-card"><b>${t('migrateBtn')}</b>
+    <p class="mut" style="font-size:12.5px;margin:6px 0 10px">${t('migrateNote')}</p>
+    <button class="btn brass sm" onclick="migrateLocalToServer()"><i class="ph ph-cloud-arrow-up"></i>${t('migrateBtn')}</button></div>`:''}
+   ${own&&MODE==='local'?`<div class="bar" style="margin-top:18px"><button class="btn danger" onclick="resetLocal()"><i class="ph ph-warning"></i>${t('resetAll')}</button></div>`:''}
+  </aside>
+ </div>`;
+}
+async function saveSettings(e){e.preventDefault();const f=new FormData(e.target);
+ try{
+  if(MODE==='server'){await api('/api/settings',{method:'PUT',body:JSON.stringify({schoolName:f.get('schoolName'),festivalDate:f.get('festivalDate')})})}
+  else{DB.settings.schoolName=String(f.get('schoolName')||'').trim();DB.settings.festivalDate=f.get('festivalDate');logAct(t('settingsTitle'));saveDB()}
+  toast(t('savedOk'));await fullRefresh();
+ }catch(err){toast(errMsg(err),'err')}
+}
+async function exportBackup(){
+ try{
+  const data=MODE==='server'?await api('/api/backup'):DB;
+  const a=document.createElement('a');
+  a.download='nour-backup-'+todayISO()+'.json';
+  a.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(data,null,1));
+  a.click();toast(t('savedOk'));
+ }catch(err){toast(errMsg(err),'err')}
+}
+/* توحيد أي نسخة احتياطية (خادم أو محلي) إلى تنسيق الوضع المحلي */
+function normalizeBackupToLocal(d){
+ if(!d||!Array.isArray(d.users))throw 0;
+ const st={};(Array.isArray(d.settings)?d.settings:Object.entries(d.settings||{}).map(([k,v])=>({key:k,value:v}))).forEach(s=>{if(s.key)st[s.key]=s.value});
+ const looksLocal=h=>typeof h==='string'&&h.length<20&&/^[0-9a-z]+$/.test(h);
+ const users=d.users.map(u=>({id:u.id,username:u.username,
+  pass:looksLocal(u.pass)?u.pass:(u.role==='owner'?pHash('095793'):pHash('123456')),
+  name:u.name||'',role:u.role==='owner'?'owner':'teacher',subject:u.subject||'',active:u.active!==false}));
+ const students=(d.students||[]).map(s=>({id:s.id,name:s.name,level:s.level==='junior'?'junior':'senior',
+  teacherId:s.teacher_id??s.teacherId??null,guardian:s.guardian||'',phone:s.phone||'',notes:s.notes||''}));
+ const tests=(d.tests||[]).map(x=>({id:x.id,title:x.title||'—',subject:x.subject||'other',type:x.type==='quran'?'quran':'subject',
+  level:x.level==='junior'?'junior':'senior',max:x.max_score??x.max??25,date:x.date||todayISO(),by:x.created_by||x.by||''}));
+ const scores=(d.scores||[]).map(c=>({id:c.id||uid('c'),testId:c.test_id??c.testId,studentId:c.student_id??c.studentId,score:Number(c.score)||0,note:c.note||''}))
+  .filter(c=>c.testId&&c.studentId);
+ const parts=d.activity_participants||d.festival_participants||[];
+ const acts=(d.activities||d.festival_activities||[]).map(a=>({id:a.id,section:a.section==='junior'?'junior':'senior',
+  title:a.title||'—',description:a.description||a.desc||'',minutes:a.minutes??a.mins??5,order:a.sort_order??a.order??0,
+  participants:parts.filter(p=>p.activity_id===a.id||p.activityId===a.id).map(p=>({name:p.name}))}));
+ const readings=(d.readings||[]).map(r=>{const f=r.from_ayah??r.from??1,to=r.to_ayah??r.to??f;
+  return{id:r.id||uid('r'),studentId:r.student_id??r.studentId,kind:['z','m','h'].includes(r.kind)?r.kind:'z',
+   surah:r.surah||'—',from:f,to,ayat:r.ayat_count??(to-f+1),listener:r.listener||'',date:r.date||todayISO(),note:r.note||''}})
+  .filter(r=>r.studentId);
+ return{settings:{schoolName:st.schoolName||'',festivalDate:st.festivalDate||isoAgo(-21)},
+  users,students,tests,scores,activities:acts,readings,
+  log:(d.log||d.system_log||[]).map(l=>({at:l.at||Date.now(),by:l.by||'',action:l.action||''})).slice(0,60)};
+}
+function importBackup(inp){
+ const file=inp.files[0];if(!file)return;
+ const rd=new FileReader();
+ rd.onload=async()=>{
+  try{
+   const d=JSON.parse(rd.result);
+   if(MODE==='server'){
+    await api('/api/backup',{method:'POST',body:JSON.stringify(d)});
+    toast(t('importedOk'));await fullRefresh();
+   }else{
+    DB=normalizeBackupToLocal(d);saveDB();
+    sessionStorage.removeItem('nsid');S.user=null;
+    toast(t('importedOk'));render();
+   }
+  }catch(e){toast(t('importFail'),'err')}
+ };
+ rd.readAsText(file);
+}
+function migrateLocalToServer(){
+ confirmBox(t('migrateNote'),async()=>{
+  try{
+   await api('/api/backup',{method:'POST',body:JSON.stringify(DB)});
+   closeModal();toast(t('migratedOk'));await fullRefresh();
+  }catch(err){closeModal();toast(errMsg(err),'err')}
+ })
+}
+function resetLocal(){confirmBox(t('resetWarn'),()=>{
+ localStorage.removeItem('nour_summer_v2');sessionStorage.removeItem('nsid');
+ closeModal();toast(t('deletedOk'));location.reload();
+})}
+
+/* ================================================================
+   18) أوراق التصدير (نسخ / صورة / PDF) — بضغطة واحدة
+================================================================ */
+function sheetHTML(title,sub,body){return `<div class="ex-sheet" style="direction:${document.documentElement.dir}">
+ <div class="ex-head"><div class="ex-school serif">${school()}</div><div class="ex-title serif">${title}</div><div class="ex-sub">${sub||''}</div></div>
+ ${body}<div class="ex-meta"><span>${t('date')}: ${fmtDate(todayISO())}</span><span>${t('supervisor')}: ______________</span><span>${t('signature')}: ______________</span></div></div>`}
+const extTable=(head,body)=>`<table class="ext"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>`;
+const SHEET_BUILDERS={
+ scores:{title:()=>t('scoresSheet'),name:()=>'scores-'+todayISO(),
+  html:()=>{const g=S.grading;if(!g||!g.test)return'';const tst=g.test;
+  const rows=(g.rows||[]).filter(r=>r.score!==null&&r.score!==undefined);
+  const avg=rows.length?rows.reduce((s,r)=>s+r.score/tst.max,0)/rows.length*100:0;
+  return sheetHTML(esc(tst.title),`${t('maxScore')}: ${tst.max} · ${t(tst.level)} · ${fmtDate(tst.date)}`,
+   extTable(['#',t('name'),t('scoreCol'),t('outOf',tst.max),t('pctCol'),t('noteCol')],
+    rows.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.name)}</td><td><b>${r.score}</b></td><td>${tst.max}</td><td>${Math.round(r.score/tst.max*100)}%</td><td>${esc(r.note||'')}</td></tr>`).join('')||`<tr><td colspan="6">${t('noScores')}</td></tr>`)
+   +`<p class="ex-sum">${t('avgRow')}: ${avg.toFixed(1)}% · ${t('presentCount',rows.length)}</p>`)}},
+ attendance:{title:()=>t('attendanceSheet'),name:()=>'attendance-'+todayISO(),
+  html:tid=>{const tst=(S.grading&&S.grading.test&&S.grading.test.id===tid)?S.grading.test:byId(V.tests,tid);if(!tst)return'';
+  const sts=V.students.filter(s=>s.level===tst.level).sort((a,b)=>a.name.localeCompare(b.name));
+  return sheetHTML(t('attendanceSheet')+' — '+esc(tst.title),`${t(tst.level)} · ${fmtDate(tst.date)}`,
+   extTable(['#',t('attendeeName'),t('testLevel'),t('attendanceSheet')+' ✓',t('signature')],
+    sts.map((s,i)=>`<tr><td>${i+1}</td><td>${esc(s.name)}</td><td>${t(s.level)}</td><td style="text-align:center">☐</td><td class="sig"></td></tr>`).join(''))
+   +`<p class="ex-note">${t('presentCount',sts.length)}</p>`)}},
+ program:{title:()=>t('programSheet'),name:()=>'festival-program',
+  html:()=>{const sec=(s,label)=>{const acts=V.activities.filter(a=>a.section===s).sort((a,b)=>(a.order||0)-(b.order||0));
+   return `<h3 class="ex-title serif" style="margin:18px 0 8px">${label}</h3>`+extTable(['#',t('testTitle'),t('activityDesc'),t('participantsLabel'),t('minutes')],
+    acts.map(a=>`<tr><td>${a.order||0}</td><td><b>${esc(a.title)}</b></td><td>${esc(a.description||a.desc||'')}</td><td>${(a.participants||[]).map(p=>esc(p.name)).join('، ')}</td><td>${a.minutes??a.mins??''}</td></tr>`).join('')||`<tr><td colspan="5">${t('noData')}</td></tr>`)};
+   return sheetHTML(t('festivalTitle'),t('festivalSub')+' — '+fmtDate(V.settings.festivalDate),sec('senior',t('seniorProgram'))+sec('junior',t('juniorProgram')))}},
+ festAtt:{title:()=>t('attendanceAllSheet'),name:()=>'festival-attendance',
+  html:()=>{let i=0;
+   const rows=V.activities.slice().sort((a,b)=>(a.section==='senior'?-1:1)-(b.section==='senior'?-1:1)||(a.order||0)-(b.order||0))
+    .flatMap(a=>(a.participants||[]).map(p=>({sec:a.section,act:a.title,name:p.name})));
+   return sheetHTML(t('attendanceAllSheet'),t('festivalTitle')+' — '+fmtDate(V.settings.festivalDate),
+    extTable(['#',t('attendeeName'),t('testLevel'),t('testTitle'),t('signature')],
+     rows.map(r=>`<tr><td>${++i}</td><td>${esc(r.name)}</td><td>${t(r.sec)}</td><td>${esc(r.act)}</td><td class="sig"></td></tr>`).join(''))
+    +`<p class="ex-note">${t('presentCount',rows.length)}</p>`)}},
+ report:{title:()=>t('reportsTitle'),name:a=>'report-'+a,
+  html:()=>{const r=S.report;if(!r||!r.student)return'';
+   return sheetHTML(t('reportFor',esc(r.student.name)),`${t('studentLevel')}: ${t(r.student.level)} · ${t('studentTeacher')}: ${r.student.teacherName?esc(r.student.teacherName):t('noTeacher')}`,
+    extTable(['#',t('testTitle'),t('testSubject'),t('maxScore'),t('scoreCol'),t('pctCol'),t('date')],
+     r.rows.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.title)}</td><td>${t('subject_'+x.subject)}</td><td>${x.max}</td><td><b>${x.score}</b></td><td>${Math.round(x.score/x.max*100)}%</td><td>${fmtDate(x.date)}</td></tr>`).join(''))
+    +`<p class="ex-sum">${t('studentAvg')}: ${Number(r.avg).toFixed(1)}% · ${t('rank')}: ${r.rank||'—'} / ${r.peers}</p>`)}},
+ readings:{title:()=>t('readingsLog'),name:()=>'readings-'+todayISO(),
+  html:()=>{const kb={z:t('kindZ'),m:t('kindM'),h:t('kindH')};let tot=0;
+   return sheetHTML(t('readingsTitle'),t('readingsSub'),
+    extTable(['#',t('date'),t('readingStudent'),t('kindCol'),t('surah'),t('fromAyah')+'–'+t('toAyah'),t('ayatWord'),t('listenedBy')],
+     V.readings.map((r,i)=>{tot+=r.ayat||0;return `<tr><td>${i+1}</td><td>${fmtDate(r.date)}</td><td>${esc(r.studentName||'—')}</td><td>${kb[r.kind]||''}</td><td>${esc(r.surah)}</td><td>${r.from}–${r.to}</td><td>${r.ayat}</td><td>${esc(r.listener||'')}</td></tr>`}).join(''))
+    +`<p class="ex-sum">${t('totalAyatCol')}: ${tot}</p>`)}},
+ students:{title:()=>t('studentsTitle'),name:()=>'students-'+todayISO(),
+  html:()=>sheetHTML(t('studentsTitle'),t('studentsSub'),
+   extTable(['#',t('name'),t('testLevel'),t('teacher'),t('guardian'),t('phone')],
+    V.students.map((s,i)=>`<tr><td>${i+1}</td><td>${esc(s.name)}</td><td>${t(s.level)}</td><td>${s.teacherName?esc(s.teacherName):t('noTeacher')}</td><td>${esc(s.guardian||'')}</td><td>${esc(s.phone||'')}</td></tr>`).join(''))}
+};
+function xbar(kind,arg=''){return `<div class="xbar"><i class="ph ph-download-simple"></i>${['copy','png','pdf'].map(f=>`<button class="btn sm ghost" onclick="doSheet('${kind}','${arg}','${f}')"><i class="ph ph-${f==='copy'?'copy':f==='png'?'image':'file-pdf'}"></i>${t(f==='copy'?'copy':f==='png'?'image':'exportPdf')}</button>`).join('')}</div>`}
+function openSheet(kind,arg=''){const b=SHEET_BUILDERS[kind];openModal(`<h3 class="mtitle serif">${b.title()}</h3><div class="sheet-box">${b.html(arg)}</div>
+ <div class="mfoot">${xbar(kind,arg)}<button class="btn sm ghost" onclick="closeModal()"><i class="ph ph-x"></i>${t('cancel')}</button></div>`,true)}
+function doSheet(kind,arg,fmt){const b=SHEET_BUILDERS[kind];_export(b.html(arg),b.name(arg),fmt)}
+async function _export(html,name,kind){
+ if(kind==='copy')return copySheet(html);
+ const st=document.getElementById('exportStage');st.innerHTML=html;st.dir=document.documentElement.dir;
+ try{
+  const c=await html2canvas(st,{scale:2,backgroundColor:'#FFFDF8'});
+  if(kind==='png'){const a=document.createElement('a');a.download=name+'.png';a.href=c.toDataURL('image/png');a.click()}
+  else{const {jsPDF}=window.jspdf;const pdf=new jsPDF('p','pt','a4');const W=pdf.internal.pageSize.getWidth()-48;const H=c.height*W/c.width;const pH=pdf.internal.pageSize.getHeight()-48;const slice=Math.floor(c.width*(pH/W));let done=0,pg=0;
+   while(done<H&&pg<8){if(pg>0)pdf.addPage();pdf.addImage(c.toDataURL('image/png'),'PNG',24,24-done,W,H);done+=slice;pg++}
+   pdf.save(name+'.pdf')}
+ }catch(e){console.error(e);toast(t('exportFail'),'err')}
+ st.innerHTML='';
+}
+async function copySheet(html){const st=document.getElementById('exportStage');st.innerHTML=html;st.dir=document.documentElement.dir;
+ let txt=st.innerText||st.textContent||'';st.innerHTML='';
+ txt=txt.replace(/\u00a0/g,' ').replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+ try{await navigator.clipboard.writeText(txt);toast(t('copied'))}catch(e){
+  const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.select();
+  try{document.execCommand('copy');toast(t('copied'))}catch(_){toast(t('copyFail'),'err')}ta.remove()}}
+
+/* ================================================================
+   19) النوافذ والتوست
+================================================================ */
+const MRoot=()=>document.getElementById('modalRoot');
+function openModal(html,wide){MRoot().innerHTML=`<div class="mback" onclick="if(event.target===this)closeModal()"><div class="modal ${wide?'wide':''}">${html}</div></div>`}
+function closeModal(){MRoot().innerHTML=''}
+function confirmBox(msg,onYes){openModal(`<h3 class="mtitle serif">${t('confirmTitle')}</h3><p class="mut" style="margin-top:8px">${msg}</p>
+ <div class="mfoot"><button class="btn ghost" onclick="closeModal()">${t('cancel')}</button><button class="btn danger" id="cfY"><i class="ph ph-trash"></i>${t('delete')}</button></div>`);
+ document.getElementById('cfY').onclick=onYes}
+function toast(msg,kind='ok'){const el=document.createElement('div');el.className='toast '+kind;el.textContent=msg;document.getElementById('toastRoot').appendChild(el);requestAnimationFrame(()=>el.classList.add('show'));setTimeout(()=>{el.classList.remove('show');setTimeout(()=>el.remove(),300)},2600)}
+
+/* ================================================================
+   20) PWA — تثبيت التطبيق
+================================================================ */
+let deferredPrompt=null;
+function buildPWA(){
+ const icon=s=>{const c=document.createElement('canvas');c.width=c.height=s;const x=c.getContext('2d');
+  x.fillStyle='#1B261C';x.fillRect(0,0,s,s);const r=s*0.21;x.save();x.translate(s/2,s/2);x.fillStyle='#BC9347';
+  x.fillRect(-r,-r,r*2,r*2);x.rotate(Math.PI/4);x.fillRect(-r,-r,r*2,r*2);x.restore();
+  x.fillStyle='#1B261C';x.beginPath();x.arc(s/2,s/2,s*0.085,0,7);x.fill();return c.toDataURL('image/png')};
+ const man={name:I18N[LANG].appName,short_name:t('appShort'),start_url:'.',display:'standalone',background_color:'#F4EEDC',theme_color:'#1B261C',
+  icons:[{src:icon(192),sizes:'192x192',type:'image/png'},{src:icon(512),sizes:'512x512',type:'image/png'}]};
+ document.getElementById('manifestLink').href=URL.createObjectURL(new Blob([JSON.stringify(man)],{type:'application/json'}));
+}
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e});
+function installPwa(){
+ if(deferredPrompt){deferredPrompt.prompt();deferredPrompt=null;return}
+ toast(t('installHint'));
+}
+
+/* ================================================================
+   21) الإقلاع — اكتشاف الوضع (خادم / محلي) واستعادة الجلسة
+================================================================ */
+(async function init(){
+ applyLang();
+ buildPWA();
+ window.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+ /* اكتشاف الوضع: هل يوجد خادم مفعّل مع قاعدة بيانات؟ */
+ try{
+  const ctrl=new AbortController();const to=setTimeout(()=>ctrl.abort(),2500);
+  const r=await fetch('/api/health',{signal:ctrl.signal});
+  clearTimeout(to);
+  if(r.ok){const j=await r.json().catch(()=>null);if(j&&j.ok)MODE='server'}
+ }catch(e){}
+ if(MODE==='server'){
+  if(TOKEN){
+   try{
+    const r=await api('/api/auth/me');
+    S.user=r.user;
+    S.loading=true;render();
+    try{await loadAll()}catch(e){toast(errMsg(e),'err')}
+    S.loading=false;render();
+    return;
+   }catch(e){/* الجلسة منتهية → شاشة الدخول */}
+  }
+  render();return;
+ }
+ /* الوضع المحلي */
+ loadDB();
+ const sid=sessionStorage.getItem('nsid');
+ if(sid){const u=byId(DB.users,sid);if(u&&u.active!==false)S.user=pubU(u)}
+ render();
+})();
+</script>
+</body>
+</html>
