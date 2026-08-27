@@ -790,7 +790,6 @@ function openStudentForm(id){
   <label class="fld">${t('notes')}</label><textarea class="inp" name="notes" rows="2">${s?esc(s.notes||''):''}</textarea>
   <div class="mfoot"><button class="btn primary" type="submit"><i class="ph ph-check"></i>${t('save')}</button><button class="btn ghost" type="button" onclick="closeModal()">${t('cancel')}</button></div>
  </form>`);
-}
 const rmv=(a,id)=>{const i=a.findIndex(x=>x.id===id);if(i>-1)a.splice(i,1)};
 async function saveStudent(e,id){e.preventDefault();const f=new FormData(e.target);
  const rec={name:String(f.get('name')).trim(),level:f.get('level'),teacherId:f.get('teacherId')||null,
